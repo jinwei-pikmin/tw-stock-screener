@@ -89,9 +89,10 @@ const nQ = M.quarters.length, nR = M.rev_months.length;
 const st = {rev_n:Math.min(D.rev_n,nR), rev_min:D.rev_min, margin_base:D.margin_base, eps_k:D.eps_k,
   inst_ratio:D.inst_ratio, inst_days:Math.round((M.inst.days||20)*D.inst_days_ratio), inst_pchg:D.inst_pchg,
   yield_min:D.yield_min!=null?D.yield_min:5, yield_basis:D.yield_basis||"est",
-  eps_pos:true, mode:"4", ind:"", q:"", sort:"score", dir:-1};
+  eps_pos:D.eps_pos!==false, mode:"4", ind:"", q:"", sort:"score", dir:-1};
 $("rev_n").max = nR;
 for (const k of ["rev_n","rev_min","margin_base","eps_k","inst_ratio","inst_days","inst_pchg","yield_min","yield_basis"]) $(k).value = st[k];
+$("eps_pos").checked = st.eps_pos;
 $("demo").innerHTML = M.demo ? '<span class="demo">模擬資料</span>' : "";
 $("meta").textContent = `產生時間 ${M.generated}｜月營收 ${M.rev_months[0]}～${M.rev_months[nR-1]}｜季報 ${M.quarters[0]}～${M.quarters[nQ-1]}｜法人 ${M.inst.start||"-"}～${M.inst.end||"-"}（${M.inst.days} 個交易日）｜資料來源：臺灣證券交易所、公開資訊觀測站`;
 $("win").textContent = `近 ${M.inst.days} 日`;

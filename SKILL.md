@@ -25,8 +25,8 @@ description: 當使用者想篩選台股上市股票、找三率三升／EPS 成
 
 ## 執行流程
 
-1. **建立檔案**：`tw_screener.py` 和 `dashboard_template.html` 放在同一個資料夾，另有 `requirements.txt`（requests、pandas、lxml 各一行）。
-2. **先跑模擬資料**：執行 `python tw_screener.py --demo --out demo.html --csv demo.csv`。用 Playwright 開啟頁面，確認沒有 JS 錯誤，KPI、篩選、排序都正常。
+1. **確認檔案與安裝套件**：確認 `tw_screener.py` 和 `dashboard_template.html` 在同一個資料夾，執行 `pip install -r requirements.txt`。
+2. **先跑模擬資料**：執行 `python tw_screener.py --demo --out demo.html --csv demo.csv`。開啟頁面確認沒有 JS 錯誤，KPI、篩選、排序都正常（有 Playwright 就用它自動檢查：`pip install playwright && playwright install chromium`；沒有就用瀏覽器手動開啟，或跳過這一步）。
 3. **確認網路**：用 curl 測試 openapi.twse.com.tw、www.twse.com.tw、mopsov.twse.com.tw。如果回傳 307，或頁面出現「因為安全性考量，您所執行的頁面無法呈現」，就是被防火牆擋了（見下方「已知限制」）。
 4. **跑真實資料**：執行 `python tw_screener.py`（可加 `--days 20 --months 3 --date YYYY-MM-DD --json raw.json`）。每次請求間隔 3 秒，第一次大約 5～10 分鐘。結果快取在 `./cache`，重跑只補缺的部分。
 5. **核對數字**：
@@ -38,7 +38,7 @@ description: 當使用者想篩選台股上市股票、找三率三升／EPS 成
 ## 已知限制（2026-11 實測）
 
 - **MOPS 擋雲端 IP**：mops.twse.com.tw、mopsov.twse.com.tw 對雲端主機回 307 或「因為安全性考量…」頁面，開網域白名單也沒用。條件 ① 和 ② 要用的歷史季報和月營收只能從台灣本地網路抓，所以要在使用者自己的電腦上執行（或請使用者自己跑）。
-  - 2026-11-11 在 Muse 雲端 VM 復測：OpenAPI 兩支與 TWSE T86 單次請求皆回 HTTP 200 並拿到當日資料；MOPS 季報 ajax_t163sb04 則被限速至約 15 KB/s——單季彙總表 1.6 MB 以逾時 300 秒設定約 107 秒可完整下載，且解析與台積電（2330）累計數核對正確。因此雲端並非完全跑不動，但全量（10 季季報＋3 個月營收）需數十分鐘（程式下載逾時已設為 300 秒）；本機（台灣網路）執行仍是首選，約 5～10 分鐘。
+  - 部分雲端環境可連線但 MOPS 被限速（約 15 KB/s），全量需數十分鐘（程式下載逾時已設為 300 秒）；本機（台灣網路）執行仍是首選，約 5～10 分鐘。
 - **www.twse.com.tw 限流**：雲端 IP 連續請求約 10 次後會被擋（307）。程式遇到 307 或 403 會立即停止，用已取得的交易日計算，不要一直重試。
 - **OpenAPI 只有最新一期**：t187ap05_L（最新月營收）、t187ap06_L_*／t187ap17_L（本季已公布的季報和三率）沒有歷史資料，只能當輔助。BWIBBU_ALL（殖利率、本益比、淨值比）和 t187ap03_L 在雲端可以正常抓。
 - 不要用繞過防火牆的方法（換 IP、偽造來源等）。被擋就說明原因，改在本地執行。
@@ -47,3 +47,4 @@ description: 當使用者想篩選台股上市股票、找三率三升／EPS 成
 ## 想調整時
 - 預設門檻在 `tw_screener.py` 的 `DEFAULTS`。儀表板的初始值也從這裡讀。
 - 新增條件時，要同時改 Python 的 `screen()`（輸出 CSV 用）和範本 JS 的 `evalStock()`、COLS、KPI、mode 選項，兩邊邏輯要一致。
+- 改了 `dashboard_template.html` 或篩選邏輯後，重跑 `python tw_screener.py --demo --out demo.html --csv demo.csv`，讓 repo 裡的 demo 檔保持最新。

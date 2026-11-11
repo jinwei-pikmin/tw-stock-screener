@@ -22,7 +22,7 @@ from pathlib import Path
 
 CACHE = Path("cache")
 SLEEP = 3.0
-UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
+UA = {"User-Agent": "tw-stock-screener/1.0 (+personal research; 3s interval)"}
 MOPS_HOSTS = ["https://mopsov.twse.com.tw", "https://mops.twse.com.tw"]
 CODE_RE = re.compile(r"^\d{4}$")
 
@@ -40,6 +40,7 @@ def log(*a):
     print(*a, file=sys.stderr, flush=True)
 
 _last_req = 0.0
+BLOCKED_MSG = "  ! 被網站防火牆擋下（多半是請求太頻繁或 IP 被擋），稍後再跑；已抓的資料都在快取裡"
 
 def fetch(url, *, params=None, data=None, encoding="utf-8", key=None, retries=3, valid=None):
     """valid(text) 回傳 False 時不寫快取（例如資料尚未公布或不完整），下次會重抓。"""
@@ -61,19 +62,20 @@ def fetch(url, *, params=None, data=None, encoding="utf-8", key=None, retries=3,
                 r = requests.get(url, params=params, headers=UA, timeout=300)
             if r.status_code == 200 and r.content:
                 text = r.content.decode(encoding, errors="replace")
-                if "PAGE CAN NOT BE ACCESSED" in text or "查詢過於頻繁" in text:
-                    log("  ! 被網站防火牆擋下，稍後再跑")
+                if "PAGE CAN NOT BE ACCESSED" in text or "查詢過於頻繁" in text or "因為安全性考量" in text:
+                    log(BLOCKED_MSG)
                     return None
                 if valid is None or valid(text):
                     path.write_text(text, encoding="utf-8")
                 return text
             log(f"  HTTP {r.status_code}: {url}")
             if r.status_code in (307, 403):
-                log("  ! 被網站防火牆擋下（多半是請求太頻繁或 IP 被擋），稍後再跑；已抓的資料都在快取裡")
+                log(BLOCKED_MSG)
                 return None
         except Exception as e:
             log(f"  第 {i+1} 次失敗 {url}: {e}")
-            time.sleep(SLEEP * (i + 2) * 2)
+            if i < retries - 1:
+                time.sleep(SLEEP * (i + 2) * 2)
     return None
 
 def num(x):
@@ -305,7 +307,18 @@ def build_institutional(today, n_days=20):
         d -= dt.timedelta(days=1)
     if not days:
         return None, {}
-    p0, p1 = fetch_close(days[0]), fetch_close(days[-1])
+    # 漲幅基準用統計期間「前一個交易日」的收盤價，才能涵蓋第 1 天的漲跌
+    p0, d = {}, days[0]
+    for _ in range(10):
+        d -= dt.timedelta(days=1)
+        if d.weekday() < 5:
+            p0 = fetch_close(d)
+            if p0:
+                break
+    if not p0:
+        log("  ! 取不到期間前一日收盤價，改用第 1 天收盤價當基準")
+        p0 = fetch_close(days[0])
+    p1 = fetch_close(days[-1])
     agg = {}
     for code in set().union(*flows):
         f = t = de = 0.0
@@ -341,7 +354,7 @@ def est_yield(twse_y, q, quarters):
         return None
     return round(twse_y * sum(ttm) / sum(prev), 2)
 
-DEFAULTS = {"rev_n": 3, "rev_min": 0, "margin_base": "qoq", "eps_k": 3, "inst_ratio": 0.3, "inst_days_ratio": 0.55, "inst_pchg": 10, "yield_min": 5, "yield_basis": "est"}
+DEFAULTS = {"rev_n": 3, "rev_min": 0, "margin_base": "qoq", "eps_k": 3, "eps_pos": True, "inst_ratio": 0.3, "inst_days_ratio": 0.55, "inst_pchg": 10, "yield_min": 5, "yield_basis": "est"}
 
 def screen(s, meta, p=DEFAULTS):
     rev = [x for x in s["rev"][-p["rev_n"]:]]
@@ -352,7 +365,7 @@ def screen(s, meta, p=DEFAULTS):
         off = 1 if p["margin_base"] == "qoq" else 4
         c1_m = all(q[k][-1] is not None and q[k][-1 - off] is not None and q[k][-1] > q[k][-1 - off] for k in ("gm", "om", "nm"))
         e = q["eps"]
-        c2 = e[-1] is not None and e[-1] > 0 and all(e[-i] is not None and e[-i - 4] is not None and e[-i] > e[-i - 4] for i in range(1, p["eps_k"] + 1))
+        c2 = (not p["eps_pos"] or (e[-1] is not None and e[-1] > 0)) and all(e[-i] is not None and e[-i - 4] is not None and e[-i] > e[-i - 4] for i in range(1, p["eps_k"] + 1))
     i = s.get("inst")
     c3 = bool(i) and i["ratio"] is not None and (i["f"] + i["t"]) > 0 and i["ratio"] >= p["inst_ratio"] and i["buy_days"] >= math.floor(meta["inst"]["days"] * p["inst_days_ratio"] + 0.5) and i["pchg"] is not None and i["pchg"] < p["inst_pchg"]
     y = s.get("yld") or {}
@@ -448,6 +461,8 @@ def main():
     ap.add_argument("--json")
     ap.add_argument("--demo", action="store_true")
     a = ap.parse_args()
+    if a.months < 3:
+        log(f"! --months 至少要 3（條件 ① 需要），已由 {a.months} 改為 3")
     today = dt.date.fromisoformat(a.date) if a.date else dt.date.today()
     meta, stocks = demo_data() if a.demo else collect(today, a.months, a.days)
     if a.json:
