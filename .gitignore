@@ -1,0 +1,6 @@
+cache/
+__pycache__/
+*.pyc
+dashboard.html
+screen_result.csv
+raw.json

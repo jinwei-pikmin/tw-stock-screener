@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>台股選股儀表板</title>
+<style>
+:root{--bg:#f7f7f5;--card:#fff;--fg:#1d1d1b;--mute:#6b6b66;--line:#e4e3de;--acc:#1f6f5c;--up:#c0392b;--down:#1e8449;--hit:#e8f3ef;--warn:#9a6b00}
+@media (prefers-color-scheme:dark){:root{--bg:#161615;--card:#1f1f1d;--fg:#ecebe6;--mute:#9b9a94;--line:#33332f;--acc:#5fc2a6;--up:#ff6b5b;--down:#4cc38a;--hit:#1d3029;--warn:#e0b14a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 -apple-system,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif}
+header{padding:20px 24px 8px}
+h1{font-size:20px;margin:0 0 4px}
+.sub{color:var(--mute);font-size:12.5px}
+.demo{background:var(--warn);color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;margin-left:8px}
+main{padding:8px 24px 40px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:12px 0}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 14px;cursor:pointer}
+.kpi.on{outline:2px solid var(--acc)}
+.kpi b{display:block;font-size:24px}
+.kpi span{color:var(--mute);font-size:12px}
+.panel{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+fieldset{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin:0}
+legend{font-weight:600;padding:0 4px}
+label{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:5px 0;font-size:13px}
+input[type=number]{width:72px;padding:3px 6px;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--fg);text-align:right}
+select,input[type=search]{padding:4px 6px;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--fg)}
+.bar{display:flex;gap:10px;align-items:center;margin:14px 0 8px;flex-wrap:wrap}
+.bar .count{color:var(--mute);margin-left:auto}
+.wrap{overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:8px;max-height:70vh}
+table{border-collapse:collapse;width:100%}
+th,td{padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap;text-align:right}
+th{position:sticky;top:0;background:var(--card);font-weight:600;cursor:pointer;font-size:12.5px;z-index:1}
+th.grp{cursor:default;color:var(--mute);font-weight:500}
+tr.r2 th{top:29px}
+td.l,th.l{text-align:left}
+tr.all td{background:var(--hit)}
+.u{color:var(--up)}.d{color:var(--down)}.na{color:var(--mute)}
+.ck{font-weight:700}.ck.y{color:var(--acc)}.ck.n{color:var(--line)}
+.sep{border-left:1px solid var(--line)}
+footer{color:var(--mute);font-size:12px;margin-top:14px;line-height:1.7}
+</style>
+</head>
+<body>
+<header>
+  <h1>台股選股儀表板 <span id="demo"></span></h1>
+  <div class="sub" id="meta"></div>
+</header>
+<main>
+  <div class="kpis" id="kpis"></div>
+  <div class="panel">
+    <fieldset><legend>① 三率三升＋月營收成長</legend>
+      <label>三率比較基準 <select id="margin_base"><option value="qoq">上一季</option><option value="yoy">去年同季</option></select></label>
+      <label>近幾個月營收 YoY <input type="number" id="rev_n" min="1" max="12"></label>
+      <label>每月 YoY 需大於 (%) <input type="number" id="rev_min" step="1"></label>
+    </fieldset>
+    <fieldset><legend>② EPS 持續成長</legend>
+      <label>近幾季單季 EPS 皆 &gt; 去年同季 <input type="number" id="eps_k" min="1" max="4"></label>
+      <label>最新一季 EPS 須 &gt; 0 <input type="checkbox" id="eps_pos" checked></label>
+    </fieldset>
+    <fieldset><legend>③ 法人低調建倉（<span id="win"></span>）</legend>
+      <label>外資＋投信累計買超佔股本 ≥ (%) <input type="number" id="inst_ratio" step="0.05"></label>
+      <label>買超天數 ≥ <input type="number" id="inst_days" min="0"></label>
+      <label>同期股價漲幅 &lt; (%) <input type="number" id="inst_pchg" step="1"></label>
+    </fieldset>
+    <fieldset><legend>④ 預估殖利率</legend>
+      <label>計算方式 <select id="yield_basis"><option value="est">預估（依獲利成長調整）</option><option value="twse">證交所公布殖利率</option></select></label>
+      <label>殖利率需大於 (%) <input type="number" id="yield_min" step="0.5"></label>
+    </fieldset>
+  </div>
+  <div class="bar">
+    <select id="mode">
+      <option value="4">四項全符合</option><option value="3">至少三項</option><option value="2">至少兩項</option>
+      <option value="c1">只看 ①</option><option value="c2">只看 ②</option><option value="c3">只看 ③</option><option value="c4">只看 ④</option>
+      <option value="0">全部股票</option>
+    </select>
+    <select id="ind"><option value="">全部產業</option></select>
+    <input type="search" id="q" placeholder="代號或名稱">
+    <span class="count" id="count"></span>
+  </div>
+  <div class="wrap"><table id="t"><thead></thead><tbody></tbody></table></div>
+  <footer id="foot"></footer>
+</main>
+<script>
+const DATA = /*__DATA__*/null;
+const M = DATA.meta, S = DATA.stocks, D = M.defaults;
+const $ = id => document.getElementById(id);
+const nQ = M.quarters.length, nR = M.rev_months.length;
+const st = {rev_n:Math.min(D.rev_n,nR), rev_min:D.rev_min, margin_base:D.margin_base, eps_k:D.eps_k,
+  inst_ratio:D.inst_ratio, inst_days:Math.round((M.inst.days||20)*D.inst_days_ratio), inst_pchg:D.inst_pchg,
+  yield_min:D.yield_min!=null?D.yield_min:5, yield_basis:D.yield_basis||"est",
+  eps_pos:true, mode:"4", ind:"", q:"", sort:"score", dir:-1};
+$("rev_n").max = nR;
+for (const k of ["rev_n","rev_min","margin_base","eps_k","inst_ratio","inst_days","inst_pchg","yield_min","yield_basis"]) $(k).value = st[k];
+$("demo").innerHTML = M.demo ? '<span class="demo">模擬資料</span>' : "";
+$("meta").textContent = `產生時間 ${M.generated}｜月營收 ${M.rev_months[0]}～${M.rev_months[nR-1]}｜季報 ${M.quarters[0]}～${M.quarters[nQ-1]}｜法人 ${M.inst.start||"-"}～${M.inst.end||"-"}（${M.inst.days} 個交易日）｜資料來源：臺灣證券交易所、公開資訊觀測站`;
+$("win").textContent = `近 ${M.inst.days} 日`;
+[...new Set(S.map(s=>s.ind).filter(Boolean))].sort().forEach(i=>$("ind").add(new Option(i,i)));
+const ok = v => v !== null && v !== undefined && !Number.isNaN(v);
+function evalStock(s){
+  const r = s.rev.slice(-st.rev_n);
+  const revOk = r.length===st.rev_n && r.every(x=>ok(x) && x>st.rev_min);
+  let m=false, e=false;
+  const q=s.q;
+  if(q){
+    const off = st.margin_base==="qoq"?1:4;
+    m = ["gm","om","nm"].every(k=>ok(q[k][nQ-1]) && ok(q[k][nQ-1-off]) && q[k][nQ-1]>q[k][nQ-1-off]);
+    const E=q.eps;
+    e = (!st.eps_pos || (ok(E[nQ-1]) && E[nQ-1]>0));
+    for(let i=1;i<=st.eps_k && e;i++) e = ok(E[nQ-i]) && ok(E[nQ-i-4]) && E[nQ-i]>E[nQ-i-4];
+  }
+  const I=s.inst;
+  const c3 = !!I && ok(I.ratio) && (I.f+I.t)>0 && I.ratio>=st.inst_ratio && I.buy_days>=st.inst_days && ok(I.pchg) && I.pchg<st.inst_pchg;
+  const Y=s.yld||{}; const yv = st.yield_basis==="est" && ok(Y.est) ? Y.est : Y.twse;
+  const c=[revOk&&m, e, c3, ok(yv) && yv>st.yield_min];
+  return {c, score:c.filter(Boolean).length};
+}
+const fmt = (v,d=1,sign=false)=> ok(v) ? (sign&&v>0?"+":"")+v.toFixed(d) : '<span class="na">–</span>';
+const cls = v => ok(v) ? (v>0?"u":v<0?"d":"") : "";
+const lots = v => ok(v) ? Math.round(v/1000).toLocaleString() : "–";
+function arrow(cur,base){ if(!ok(cur)||!ok(base)) return ""; return cur>base?' <span class="u">▲</span>':cur<base?' <span class="d">▼</span>':""; }
+const COLS = [
+  {k:"c",t:"代號",l:1,v:s=>s.c},
+  {k:"n",t:"名稱",l:1,v:s=>s.n},
+  {k:"ind",t:"產業",l:1,v:s=>s.ind},
+  {k:"close",t:"收盤",v:s=>s.inst?s.inst.close:null},
+  ...M.rev_months.map((mo,i)=>({k:"rev"+i,t:mo.slice(2).replace("-","/"),g:"月營收 YoY %",v:s=>s.rev[i],sep:i===0})),
+  ...[["gm","毛利率"],["om","營益率"],["nm","淨利率"]].map(([k,t],i)=>({k,t,g:"三率 % ("+M.quarters[nQ-1]+")",v:s=>s.q?s.q[k][nQ-1]:null,sep:i===0})),
+  ...M.quarters.slice(-4).map((qq,i)=>({k:"eps"+i,t:qq.slice(2),g:"單季 EPS",v:s=>s.q?s.q.eps[nQ-4+i]:null,sep:i===0})),
+  {k:"fl",t:"外資(張)",g:"法人 "+M.inst.days+" 日",v:s=>s.inst?s.inst.f:null,sep:1},
+  {k:"tr",t:"投信(張)",g:"法人 "+M.inst.days+" 日",v:s=>s.inst?s.inst.t:null},
+  {k:"ratio",t:"佔股本%",g:"法人 "+M.inst.days+" 日",v:s=>s.inst?s.inst.ratio:null},
+  {k:"bd",t:"買超天",g:"法人 "+M.inst.days+" 日",v:s=>s.inst?s.inst.buy_days:null},
+  {k:"pchg",t:"漲幅%",g:"法人 "+M.inst.days+" 日",v:s=>s.inst?s.inst.pchg:null},
+  {k:"yt",t:"公布",g:"殖利率 %",v:s=>s.yld?s.yld.twse:null,sep:1},
+  {k:"ye",t:"預估",g:"殖利率 %",v:s=>s.yld?s.yld.est:null},
+  {k:"pe",t:"本益比",g:"殖利率 %",v:s=>s.yld?s.yld.pe:null},
+  {k:"c1",t:"①",v:(s,e)=>+e.c[0],sep:1},{k:"c2",t:"②",v:(s,e)=>+e.c[1]},{k:"c3",t:"③",v:(s,e)=>+e.c[2]},{k:"c4",t:"④",v:(s,e)=>+e.c[3]},
+  {k:"score",t:"符合",v:(s,e)=>e.score},
+];
+function head(){
+  const groups=[]; COLS.forEach(c=>{const g=c.g||""; if(groups.length&&groups[groups.length-1].g===g) groups[groups.length-1].n++; else groups.push({g,n:1});});
+  $("t").tHead.innerHTML = "<tr>"+groups.map(g=>`<th class="grp" colspan="${g.n}">${g.g}</th>`).join("")+"</tr>"+
+    '<tr class="r2">'+COLS.map(c=>`<th data-k="${c.k}" class="${c.l?"l":""} ${c.sep?"sep":""}">${c.t}${st.sort===c.k?(st.dir>0?" ↑":" ↓"):""}</th>`).join("")+"</tr>";
+  $("t").tHead.querySelectorAll("th[data-k]").forEach(th=>th.onclick=()=>{const k=th.dataset.k; st.dir = st.sort===k? -st.dir : (COLS.find(c=>c.k===k).l?1:-1); st.sort=k; render();});
+}
+function cell(c,s,e){
+  const v=c.v(s,e); const sep=c.sep?" sep":"";
+  if(c.l) return `<td class="l${sep}">${v!=null?v:""}</td>`;
+  if(c.k.startsWith("rev")||c.k==="pchg") return `<td class="${cls(v)}${sep}">${fmt(v,1,true)}</td>`;
+  if(["gm","om","nm"].includes(c.k)){const off=st.margin_base==="qoq"?1:4; return `<td class="${sep}">${fmt(v,1)}${arrow(v,s.q?s.q[c.k][nQ-1-off]:null)}</td>`;}
+  if(c.k.startsWith("eps")){const i=nQ-4+(+c.k.slice(3)); return `<td class="${sep}">${fmt(v,2)}${arrow(v,s.q?s.q.eps[i-4]:null)}</td>`;}
+  if(c.k==="fl"||c.k==="tr") return `<td class="${cls(v)}${sep}">${lots(v)}</td>`;
+  if(["yt","ye","pe"].includes(c.k)) return `<td class="${sep}">${fmt(v,2)}</td>`;
+  if(c.k==="ratio") return `<td class="${sep}">${fmt(v,2)}</td>`;
+  if(/^c\d$/.test(c.k)) return `<td class="ck ${v?"y":"n"}${sep}">${v?"✓":"·"}</td>`;
+  return `<td class="${sep}">${ok(v)?v:"–"}</td>`;
+}
+function render(){
+  const ev = S.map(s=>[s,evalStock(s)]);
+  const cnt=[0,1,2,3].map(i=>ev.filter(([,e])=>e.c[i]).length), all=ev.filter(([,e])=>e.score===4).length;
+  $("kpis").innerHTML = [["4",all,"四項全符合"],["c1",cnt[0],"① 三率三升＋營收成長"],["c2",cnt[1],"② EPS 持續成長"],["c3",cnt[2],"③ 法人低調建倉"],["c4",cnt[3],"④ 預估殖利率 > "+st.yield_min+"%"],["0",S.length,"上市股票總數"]]
+    .map(([m,n,t])=>`<div class="kpi ${st.mode===m?"on":""}" data-m="${m}"><b>${n}</b><span>${t}</span></div>`).join("");
+  $("kpis").querySelectorAll(".kpi").forEach(k=>k.onclick=()=>{st.mode=k.dataset.m;$("mode").value=st.mode;render();});
+  const q=st.q.trim();
+  let rows = ev.filter(([s,e])=>{
+    if(st.mode==="4"&&e.score<4) return false;
+    if(st.mode==="3"&&e.score<3) return false;
+    if(st.mode==="2"&&e.score<2) return false;
+    if(/^c\d$/.test(st.mode)&&!e.c[+st.mode[1]-1]) return false;
+    if(st.ind&&s.ind!==st.ind) return false;
+    if(q&&!(s.c.includes(q)||s.n.includes(q))) return false;
+    return true;
+  });
+  const col=COLS.find(c=>c.k===st.sort);
+  rows.sort((a,b)=>{let x=col.v(...a),y=col.v(...b); if(!ok(x)&&!ok(y))return 0; if(!ok(x))return 1; if(!ok(y))return -1;
+    if(typeof x==="string") return x.localeCompare(y,"zh-Hant")*st.dir; return (x-y)*st.dir || (b[1].score-a[1].score);});
+  head();
+  $("t").tBodies[0].innerHTML = rows.slice(0,800).map(([s,e])=>`<tr class="${e.score===4?"all":""}">${COLS.map(c=>cell(c,s,e)).join("")}</tr>`).join("")
+    || `<tr><td class="l" colspan="${COLS.length}" style="padding:24px;color:var(--mute)">沒有符合的股票，試著放寬門檻。</td></tr>`;
+  $("count").textContent = `顯示 ${Math.min(rows.length,800)} / ${rows.length} 檔`;
+}
+$("yield_basis").onchange=e=>{st.yield_basis=e.target.value;render();};
+for (const k of ["rev_n","rev_min","eps_k","inst_ratio","inst_days","inst_pchg","yield_min"]) $(k).oninput=()=>{const v=parseFloat($(k).value); if(!Number.isNaN(v)){st[k]=v;render();}};
+$("margin_base").onchange=e=>{st.margin_base=e.target.value;render();};
+$("eps_pos").onchange=e=>{st.eps_pos=e.target.checked;render();};
+$("mode").onchange=e=>{st.mode=e.target.value;render();};
+$("ind").onchange=e=>{st.ind=e.target.value;render();};
+$("q").oninput=e=>{st.q=e.target.value;render();};
+$("foot").innerHTML = `說明：三率與 EPS 為單季數（由累計數相減）；▲▼ 為與比較基準（三率：上一季／去年同季，EPS：去年同季）相比。法人「佔股本%」＝外資（不含外資自營商）＋投信累計買賣超股數 ÷ 已發行普通股數；「買超天」＝外資＋投信合計買超的天數；「漲幅」為統計期間首尾收盤價變化。「預估殖利率」＝證交所殖利率 × 近四季EPS ÷ 去年全年EPS，即假設配息率不變；缺季報或 EPS 為負時以證交所殖利率代替。金融保險業無毛利欄位，條件 ① 不適用。本頁僅為篩選工具，不構成投資建議。`;
+render();
+</script>
+</body>
+</html>
