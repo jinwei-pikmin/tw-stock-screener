@@ -163,10 +163,10 @@ def fetch_income_cum(y, s):
     payload = {"encodeURIComponent": 1, "step": 1, "firstin": 1, "off": 1, "isQuery": "Y", "TYPEK": "sii", "year": roc, "season": f"{s:02d}"}
     html = None
     for host in MOPS_HOSTS:
-        html = fetch(f"{host}/mops/web/ajax_t163sb04", data=payload, key=f"is_{y}Q{s}.html")
-        if html and "公司代號" in html:
-            break
-        html = None
+        candidate = fetch(f"{host}/mops/web/ajax_t163sb04", data=payload, key=f"is_{y}Q{s}.html")
+      if candidate and any(pick_col(list(t.columns), "公司代號") for t in read_tables(candidate)):
+                    html = candidate
+                    break
     if not html:
         return {}
     out = {}
