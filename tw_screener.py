@@ -17,7 +17,7 @@
 所有下載結果快取在 ./cache，重跑只補抓缺的部分。證交所有流量限制，預設每次請求間隔 3 秒。
 """
 from __future__ import annotations
-import argparse, datetime as dt, io, json, random, re, sys, time
+import argparse, datetime as dt, io, json, math, random, re, sys, time
 from pathlib import Path
 
 CACHE = Path("cache")
@@ -41,7 +41,8 @@ def log(*a):
 
 _last_req = 0.0
 
-def fetch(url, *, params=None, data=None, encoding="utf-8", key=None, retries=3):
+def fetch(url, *, params=None, data=None, encoding="utf-8", key=None, retries=3, valid=None):
+    """valid(text) 回傳 False 時不寫快取（例如資料尚未公布或不完整），下次會重抓。"""
     import requests
     CACHE.mkdir(exist_ok=True)
     path = CACHE / (key or re.sub(r"[^\w.-]+", "_", url + json.dumps(params or data or {}))[:180])
@@ -63,7 +64,8 @@ def fetch(url, *, params=None, data=None, encoding="utf-8", key=None, retries=3)
                 if "PAGE CAN NOT BE ACCESSED" in text or "查詢過於頻繁" in text:
                     log("  ! 被網站防火牆擋下，稍後再跑")
                     return None
-                path.write_text(text, encoding="utf-8")
+                if valid is None or valid(text):
+                    path.write_text(text, encoding="utf-8")
                 return text
             log(f"  HTTP {r.status_code}: {url}")
             if r.status_code in (307, 403):
@@ -131,7 +133,7 @@ def fetch_month_revenue(y, m):
     roc = y - 1911
     html = None
     for host in MOPS_HOSTS:
-        html = fetch(f"{host}/nas/t21/sii/t21sc03_{roc}_{m}_0.html", encoding="cp950", key=f"rev_{y}{m:02d}.html")
+        html = fetch(f"{host}/nas/t21/sii/t21sc03_{roc}_{m}_0.html", encoding="cp950", key=f"rev_{y}{m:02d}.html", valid=lambda t: len(re.findall(r">\s*\d{4}\s*<", t)) >= 100)
         if html:
             break
     if not html:
@@ -158,15 +160,19 @@ def latest_revenue_month(today):
         y -= 1
     return y, m
 
+def _has_code_table(html):
+    # MOPS 原始 HTML 找不到「公司代號」字串，要解析表格、正規化欄名後才判斷得出來
+    return any(pick_col(list(t.columns), "公司代號") for t in read_tables(html))
+
 def fetch_income_cum(y, s):
     roc = y - 1911
     payload = {"encodeURIComponent": 1, "step": 1, "firstin": 1, "off": 1, "isQuery": "Y", "TYPEK": "sii", "year": roc, "season": f"{s:02d}"}
     html = None
     for host in MOPS_HOSTS:
-        candidate = fetch(f"{host}/mops/web/ajax_t163sb04", data=payload, key=f"is_{y}Q{s}.html")
-      if candidate and any(pick_col(list(t.columns), "公司代號") for t in read_tables(candidate)):
-                    html = candidate
-                    break
+        candidate = fetch(f"{host}/mops/web/ajax_t163sb04", data=payload, key=f"is_{y}Q{s}.html", valid=_has_code_table)
+        if candidate and _has_code_table(candidate):
+            html = candidate
+            break
     if not html:
         return {}
     out = {}
@@ -240,8 +246,14 @@ def build_quarters(today, n=8):
         result[code] = {"gm": gm, "om": om, "nm": nm, "eps": eps}
     return [f"{y}Q{s}" for y, s in qs], result
 
+def _stat_ok(text):
+    try:
+        return json.loads(text).get("stat") == "OK"
+    except ValueError:
+        return False
+
 def fetch_t86(day):
-    txt = fetch("https://www.twse.com.tw/rwd/zh/fund/T86", params={"date": f"{day:%Y%m%d}", "selectType": "ALLBUT0999", "response": "json"}, key=f"t86_{day:%Y%m%d}.json")
+    txt = fetch("https://www.twse.com.tw/rwd/zh/fund/T86", params={"date": f"{day:%Y%m%d}", "selectType": "ALLBUT0999", "response": "json"}, key=f"t86_{day:%Y%m%d}.json", valid=_stat_ok)
     if not txt:
         return None
     j = json.loads(txt)
@@ -260,7 +272,7 @@ def fetch_t86(day):
     return out
 
 def fetch_close(day):
-    txt = fetch("https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX", params={"date": f"{day:%Y%m%d}", "type": "ALLBUT0999", "response": "json"}, key=f"close_{day:%Y%m%d}.json")
+    txt = fetch("https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX", params={"date": f"{day:%Y%m%d}", "type": "ALLBUT0999", "response": "json"}, key=f"close_{day:%Y%m%d}.json", valid=_stat_ok)
     if not txt:
         return {}
     j = json.loads(txt)
@@ -342,7 +354,7 @@ def screen(s, meta, p=DEFAULTS):
         e = q["eps"]
         c2 = e[-1] is not None and e[-1] > 0 and all(e[-i] is not None and e[-i - 4] is not None and e[-i] > e[-i - 4] for i in range(1, p["eps_k"] + 1))
     i = s.get("inst")
-    c3 = bool(i) and i["ratio"] is not None and (i["f"] + i["t"]) > 0 and i["ratio"] >= p["inst_ratio"] and i["buy_days"] >= round(meta["inst"]["days"] * p["inst_days_ratio"]) and i["pchg"] is not None and i["pchg"] < p["inst_pchg"]
+    c3 = bool(i) and i["ratio"] is not None and (i["f"] + i["t"]) > 0 and i["ratio"] >= p["inst_ratio"] and i["buy_days"] >= math.floor(meta["inst"]["days"] * p["inst_days_ratio"] + 0.5) and i["pchg"] is not None and i["pchg"] < p["inst_pchg"]
     y = s.get("yld") or {}
     yv = y.get("est") if p["yield_basis"] == "est" and y.get("est") is not None else y.get("twse")
     c4 = yv is not None and yv > p["yield_min"]
